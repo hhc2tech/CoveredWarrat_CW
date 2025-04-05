@@ -2,10 +2,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
+import plotly.graph_objects as go
 import plotly.express as px
 import io
 
-# --- Black-Scholes pricing function ---
+from cw_logic import bs_price, greeks, simulate_pnl
+
+# --- App Interface ---
 def bs_price(S, K, T, r, sigma, option_type='call'):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
@@ -26,7 +29,7 @@ def greeks(S, K, T, r, sigma, option_type='call'):
              -S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) +
              r * K * np.exp(-r * T) * norm.cdf(-d2))
     rho = K * T * np.exp(-r * T) * norm.cdf(d2) if option_type == 'call' else -K * T * np.exp(-r * T) * norm.cdf(-d2)
-    
+
     return {
         'Price': price,
         'Delta': delta,
@@ -58,7 +61,6 @@ else:
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
-# --- Analysis Section ---
 if df is not None and not df.empty:
     st.subheader("Initial Data Preview")
     st.dataframe(df)
@@ -67,56 +69,31 @@ if df is not None and not df.empty:
     for _, row in df.iterrows():
         try:
             result = greeks(row['S'], row['K'], row['T'], row['r'], row['sigma'], row['option_type'].lower())
+            result['Market Price'] = row.get('CW_market_price', None)
             results.append(result)
         except:
-            results.append({'Price': None, 'Delta': None, 'Gamma': None, 'Vega': None, 'Theta': None, 'Rho': None})
-    
+            results.append({'Price': None, 'Delta': None, 'Gamma': None, 'Vega': None, 'Theta': None, 'Rho': None, 'Market Price': None})
+
     greek_df = pd.DataFrame(results)
     final_df = pd.concat([df, greek_df], axis=1)
 
     st.success("Calculation completed!")
     st.dataframe(final_df)
 
-    st.subheader("Interactive Chart - CW Price Sensitivity")
-    selected_index = st.number_input("Select a CW row to analyze", min_value=0, max_value=len(final_df)-1, value=0)
+    st.subheader("Overlay: Theoretical vs Market CW Price")
+    if 'CW_market_price' in df.columns:
+        fig_overlay = go.Figure()
+        fig_overlay.add_trace(go.Scatter(y=final_df['Price'], x=final_df.index, mode='lines+markers', name='Black-Scholes Price'))
+        fig_overlay.add_trace(go.Scatter(y=final_df['CW_market_price'], x=final_df.index, mode='lines+markers', name='Market CW Price'))
+        fig_overlay.update_layout(title="CW Market Price vs Theoretical Price", xaxis_title="Data Point", yaxis_title="CW Price")
+        st.plotly_chart(fig_overlay, use_container_width=True)
+    else:
+        st.info("CW_market_price column not found for comparison.")
+
+    st.subheader("CW Profit/Loss Simulation at Maturity")
+    selected_index = st.number_input("Select a CW row to simulate", min_value=0, max_value=len(final_df)-1, value=0)
     selected_row = final_df.iloc[selected_index]
 
-    var_to_plot = st.selectbox("Select a variable to analyze", ['S', 'T', 'sigma'], index=0)
-    if var_to_plot == 'S':
-        x_range = np.linspace(selected_row['K'] * 0.6, selected_row['K'] * 1.4, 50)
-    elif var_to_plot == 'T':
-        x_range = np.linspace(0.01, 2, 50)
-    elif var_to_plot == 'sigma':
-        x_range = np.linspace(0.05, 1.0, 50)
-
-    prices = []
-    for x in x_range:
-        args = {
-            'S': selected_row['S'],
-            'K': selected_row['K'],
-            'T': selected_row['T'],
-            'r': selected_row['r'],
-            'sigma': selected_row['sigma'],
-            'option_type': selected_row['option_type'].lower()
-        }
-        args[var_to_plot] = x
-        price, _, _ = bs_price(**args)
-        prices.append(price)
-
-    df_plot = pd.DataFrame({var_to_plot: x_range, 'CW Price': prices})
-    fig = px.line(df_plot, x=var_to_plot, y='CW Price',
-                  title=f"CW Price Sensitivity to {var_to_plot}",
-                  labels={var_to_plot: var_to_plot, 'CW Price': 'CW Price'})
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Export results
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        final_df.to_excel(writer, index=False, sheet_name='CW Results')
-    st.download_button("Download Excel Result", data=output.getvalue(), file_name="cw_results.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # --- Profit/Loss Simulation ---
-    st.subheader("CW Profit/Loss Simulation at Maturity")
     with st.expander("Input Simulation Parameters"):
         buy_price = st.number_input("CW Purchase Price (VND)", value=3000.0, step=100.0)
         ratio = st.number_input("Conversion Ratio (e.g. enter 5 for 5:1)", value=5.0, min_value=0.1)
@@ -129,18 +106,39 @@ if df is not None and not df.empty:
 
     S_range = np.linspace(K * 0.6, K * 1.4, 100)
     profit = []
+    profit_pct = []
 
     for S_T in S_range:
         price_T, _, _ = bs_price(S_T, K, final_T, r, sigma, option_type)
         intrinsic_value = max(S_T - K, 0) if option_type == 'call' else max(K - S_T, 0)
         received = intrinsic_value / ratio
         pnl = received - buy_price - fee
+        pnl_pct = (pnl / (buy_price + fee)) * 100 if (buy_price + fee) > 0 else 0
         profit.append(pnl)
+        profit_pct.append(pnl_pct)
 
-    df_pnl = pd.DataFrame({'Stock Price at Maturity': S_range, 'Profit/Loss (VND)': profit})
-    fig_pnl = px.line(df_pnl, x='Stock Price at Maturity', y='Profit/Loss (VND)',
-                      title='Profit/Loss Holding CW Until Maturity',
-                      labels={'Stock Price at Maturity': 'Stock Price', 'Profit/Loss (VND)': 'Profit/Loss (VND)'})
+    df_pnl = pd.DataFrame({
+        'Stock Price at Maturity': S_range,
+        'Profit/Loss (VND)': profit,
+        'Profit/Loss (%)': profit_pct
+    })
+
+    plot_mode = st.radio("Select chart mode", ["VND", "Percentage (%)"])
+    if plot_mode == "VND":
+        fig_pnl = go.Figure()
+        fig_pnl.add_trace(go.Scatter(x=df_pnl['Stock Price at Maturity'], y=df_pnl['Profit/Loss (VND)'],
+                                     fill='tozeroy', fillcolor='rgba(0,255,0,0.2)', line=dict(color='green'),
+                                     name='Profit'))
+        fig_pnl.update_layout(title="Profit/Loss (VND) at Maturity",
+                              xaxis_title="Stock Price", yaxis_title="Profit/Loss (VND)")
+    else:
+        fig_pnl = go.Figure()
+        fig_pnl.add_trace(go.Scatter(x=df_pnl['Stock Price at Maturity'], y=df_pnl['Profit/Loss (%)'],
+                                     fill='tozeroy', fillcolor='rgba(0,0,255,0.2)', line=dict(color='blue'),
+                                     name='Profit (%)'))
+        fig_pnl.update_layout(title="Profit/Loss (%) at Maturity",
+                              xaxis_title="Stock Price", yaxis_title="Profit/Loss (%)")
+
     st.plotly_chart(fig_pnl, use_container_width=True)
 
     try:
