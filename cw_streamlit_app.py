@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from scipy.stats import norm
 import io
+from scipy.stats import norm
+import plotly.express as px  # 👈 Add this line
 
 # Hàm d?nh giá Black-Scholes
 def bs_price(S, K, T, r, sigma, option_type='call'):
