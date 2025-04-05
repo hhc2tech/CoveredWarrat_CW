@@ -4,7 +4,7 @@ import numpy as np
 from scipy.stats import norm
 import io
 
-# H‡m d?nh gi· Black-Scholes
+# H√†m d?nh gi√° Black-Scholes
 def bs_price(S, K, T, r, sigma, option_type='call'):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
@@ -14,7 +14,7 @@ def bs_price(S, K, T, r, sigma, option_type='call'):
         price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
     return price, d1, d2
 
-# H‡m tÌnh Greek
+# H√†m t√≠nh Greek
 def greeks(S, K, T, r, sigma, option_type='call'):
     price, d1, d2 = bs_price(S, K, T, r, sigma, option_type)
     delta = norm.cdf(d1) if option_type == 'call' else -norm.cdf(-d1)
@@ -35,95 +35,120 @@ def greeks(S, K, T, r, sigma, option_type='call'):
         'Rho': rho
     }
 
-# Giao di?n chÌnh
-st.title("?? CÙng c? d?nh gi· Ch?ng quy?n (Covered Warrant) - Black-Scholes")
-st.markdown("T?i file d? li?u CW (CSV ho?c Excel), h? th?ng s? tÌnh gi· v‡ c·c h? s? Greek.")
+# Giao di?n ch√≠nh
+#st.title("Cong cu dinh gia chung quyen (Covered Warrant) - Black-Scholes")
+#st.markdown("Tai file du lieu CW (CSV hoac Excel).")
 
-uploaded_file = st.file_uploader("?? T?i file Excel ho?c CSV", type=["xlsx", "csv"])
+#uploaded_file = st.file_uploader("Tai file Excel hoac CSV", type=["xlsx", "csv"])
+st.markdown("## üìÅ Data Input")
 
-if uploaded_file:
+file_option = st.radio("üìå Choose data source", ["üìÇ Use sample file (data.csv)", "‚¨ÜÔ∏è Upload new file"])
+
+if file_option == "üìÇ Use sample file (data.csv)":
     try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
+        df = pd.read_csv("data.csv")  # You can change the path if needed
+        st.success("‚úÖ Successfully loaded the sample file 'data.csv'")
+    except FileNotFoundError:
+        st.error("‚ùå File 'data.csv' not found. Make sure it's in the same directory as this app.")
+        df = None
+else:
+    uploaded_file = st.file_uploader("üì• Upload Excel or CSV file", type=["xlsx", "csv"])
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+            st.success("‚úÖ Successfully uploaded your file.")
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+            df = None
+    else:
+        df = None
 
-        st.write("? D? li?u ban d?u:")
-        st.dataframe(df)
+# Main Interface
+st.title("Covered Warrant (CW) Valuation Tool - Black-Scholes Model")
 
-        results = []
-        for _, row in df.iterrows():
-            try:
-                result = greeks(row['S'], row['K'], row['T'], row['r'], row['sigma'], row['option_type'].lower())
-                results.append(result)
-            except:
-                results.append({'Price': None, 'Delta': None, 'Gamma': None, 'Vega': None, 'Theta': None, 'Rho': None})
-        
-        greek_df = pd.DataFrame(results)
-        final_df = pd.concat([df, greek_df], axis=1)
+# File upload already handled before this block (as in previous message)
 
-        st.success("? TÌnh to·n ho‡n t?t!")
-        st.dataframe(final_df)
-        st.markdown("---")
-        st.subheader("?? –? th? tuong t·c - Ph‚n tÌch bi?n d?ng gi· CW")
+if df is not None:
+    st.write("üìÑ Initial Data Preview:")
+    st.dataframe(df)
 
-        selected_index = st.number_input("?? Ch?n dÚng CW d? kh?o s·t", min_value=0, max_value=len(final_df)-1, value=0, step=1)
-        selected_row = final_df.iloc[selected_index]
+    # Calculate option price and Greeks for each row
+    results = []
+    for _, row in df.iterrows():
+        try:
+            result = greeks(row['S'], row['K'], row['T'], row['r'], row['sigma'], row['option_type'].lower())
+            results.append(result)
+        except:
+            results.append({'Price': None, 'Delta': None, 'Gamma': None, 'Vega': None, 'Theta': None, 'Rho': None})
+    
+    greek_df = pd.DataFrame(results)
+    final_df = pd.concat([df, greek_df], axis=1)
 
-        var_to_plot = st.selectbox("?? Ch?n bi?n d? ph‚n tÌch", ['S', 'T', 'sigma'], index=0)
+    st.success("‚úÖ Calculation completed!")
+    st.dataframe(final_df)
 
-        # T?o ph?m vi gi· tr? d? v? d? th?
-        if var_to_plot == 'S':
-            x_range = np.linspace(selected_row['K'] * 0.6, selected_row['K'] * 1.4, 50)
-        elif var_to_plot == 'T':
-            x_range = np.linspace(0.01, 2, 50)
-        elif var_to_plot == 'sigma':
-            x_range = np.linspace(0.05, 1.0, 50)
+    # Interactive Plot Section
+    st.markdown("---")
+    st.subheader("üìä Interactive Chart - Analyze CW Price Sensitivity")
 
-        # TÌnh l?i gi· theo bi?n d„ ch?n
-        prices = []
-        for x in x_range:
-            args = {
-                'S': selected_row['S'],
-                'K': selected_row['K'],
-                'T': selected_row['T'],
-                'r': selected_row['r'],
-                'sigma': selected_row['sigma'],
-                'option_type': selected_row['option_type'].lower()
-            }
-            args[var_to_plot] = x
-            price, _, _ = bs_price(**args)
-            prices.append(price)
+    selected_index = st.number_input("üî¢ Select a CW row to analyze", min_value=0, max_value=len(final_df)-1, value=0, step=1)
+    selected_row = final_df.iloc[selected_index]
 
-        df_plot = pd.DataFrame({var_to_plot: x_range, 'CW Price': prices})
-        fig = px.line(df_plot, x=var_to_plot, y='CW Price',
-                      title=f"Bi?n d?ng Gi· CW theo {var_to_plot}",
-                      labels={var_to_plot: var_to_plot, 'CW Price': 'Gi· CW'})
-        st.plotly_chart(fig, use_container_width=True)
+    var_to_plot = st.selectbox("üìà Choose a variable to analyze", ['S', 'T', 'sigma'], index=0)
 
-        # T?i v? file k?t qu?
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            final_df.to_excel(writer, index=False, sheet_name='CW Results')
-        st.download_button("?? T?i k?t qu? Excel", data=output.getvalue(), file_name="cw_results.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # Generate the range of values for plotting
+    if var_to_plot == 'S':
+        x_range = np.linspace(selected_row['K'] * 0.6, selected_row['K'] * 1.4, 50)
+    elif var_to_plot == 'T':
+        x_range = np.linspace(0.01, 2, 50)
+    elif var_to_plot == 'sigma':
+        x_range = np.linspace(0.05, 1.0, 50)
 
-    except Exception as e:
-        st.error(f"L?i x? l˝: {e}")
+    # Recalculate CW price based on selected variable
+    prices = []
+    for x in x_range:
+        args = {
+            'S': selected_row['S'],
+            'K': selected_row['K'],
+            'T': selected_row['T'],
+            'r': selected_row['r'],
+            'sigma': selected_row['sigma'],
+            'option_type': selected_row['option_type'].lower()
+        }
+        args[var_to_plot] = x
+        price, _, _ = bs_price(**args)
+        prices.append(price)
 
+    df_plot = pd.DataFrame({var_to_plot: x_range, 'CW Price': prices})
+    fig = px.line(df_plot, x=var_to_plot, y='CW Price',
+                  title=f"Sensitivity of CW Price to {var_to_plot}",
+                  labels={var_to_plot: var_to_plot, 'CW Price': 'Covered Warrant Price'})
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Export results to Excel
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        final_df.to_excel(writer, index=False, sheet_name='CW Results')
+    st.download_button("üì• Download Result (Excel)", data=output.getvalue(), file_name="cw_results.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# Profit & Loss Simulation Section
 st.markdown("---")
-st.subheader("?? MÙ ph?ng l„i/l? CW d?n d·o h?n")
+st.subheader("üìà CW Profit/Loss Simulation at Maturity")
 
-with st.expander("?? Nh?p thÙng s? mÙ ph?ng"):
-    buy_price = st.number_input("?? Gi· mua CW (d?ng)", value=3000.0, step=100.0)
-    ratio = st.number_input("?? T? l? chuy?n d?i (vÌ d? 5:1 nh?p 5)", value=5.0, min_value=0.1)
-    fee = st.number_input("?? PhÌ giao d?ch 1 chi?u (d?ng)", value=0.0, step=100.0)
-    final_T = st.number_input("? Th?i gian cÚn l?i d?n d·o h?n (nam)", value=selected_row['T'], min_value=0.01)
+with st.expander("üõ†Ô∏è Input Simulation Parameters"):
+    buy_price = st.number_input("üí∞ CW Purchase Price (VND)", value=3000.0, step=100.0)
+    ratio = st.number_input("üîÑ Conversion Ratio (e.g. enter 5 for 5:1)", value=5.0, min_value=0.1)
+    fee = st.number_input("üí∏ One-way Transaction Fee (VND)", value=0.0, step=100.0)
+    final_T = st.number_input("‚è≥ Time to Maturity (Years)", value=selected_row['T'], min_value=0.01)
     K = selected_row['K']
     r = selected_row['r']
     sigma = selected_row['sigma']
     option_type = selected_row['option_type'].lower()
 
-# T?o d?i gi· c? phi?u t?i d·o h?n
+# Simulate stock price range at maturity
 S_range = np.linspace(K * 0.6, K * 1.4, 100)
 profit = []
 
@@ -134,19 +159,17 @@ for S_T in S_range:
     pnl = received - buy_price - fee
     profit.append(pnl)
 
-df_pnl = pd.DataFrame({'S_T (Gi· CP d·o h?n)': S_range, 'L„i/L? (VND)': profit})
-fig_pnl = px.line(df_pnl, x='S_T (Gi· CP d·o h?n)', y='L„i/L? (VND)',
-                  title='?? L?i nhu?n/L? khi n?m gi? CW d?n d·o h?n',
-                  labels={'S_T (Gi· CP d·o h?n)': 'Gi· CP d?n d·o h?n', 'L„i/L? (VND)': 'L?i nhu?n/VND'})
+df_pnl = pd.DataFrame({'Stock Price at Maturity': S_range, 'Profit/Loss (VND)': profit})
+fig_pnl = px.line(df_pnl, x='Stock Price at Maturity', y='Profit/Loss (VND)',
+                  title='üìä Profit/Loss Simulation Holding CW until Maturity',
+                  labels={'Stock Price at Maturity': 'Stock Price at Maturity', 'Profit/Loss (VND)': 'P&L in VND'})
 
 st.plotly_chart(fig_pnl, use_container_width=True)
 
-# Hi?n th? di?m hÚa v?n
+# Show breakeven point
 try:
     breakeven_idx = np.argmin(np.abs(np.array(profit)))
     breakeven_price = S_range[breakeven_idx]
-    st.success(f"?? –i?m hÚa v?n u?c tÌnh: kho?ng **{breakeven_price:.2f} d?ng/c? phi?u**")
+    st.success(f"üí° Estimated Breakeven Stock Price: **{breakeven_price:.2f} VND**")
 except:
-    st.warning("KhÙng tÏm th?y di?m hÚa v?n trong kho?ng gi· kh?o s·t.")
-
-
+    st.warning("No breakeven point found within the simulated price range.")
